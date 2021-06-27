@@ -4,7 +4,7 @@
 # Script for testing Formula locally without the need to uninstall Emacs.
 #
 # Usage example:
-#   $ ./build 25 --without-spacemacs-icon --HEAD
+#   $ ./build 27 --without-spacemacs-icon --HEAD
 #
 
 SOURCE_FILE_26=Formula/emacs-plus@26.rb
@@ -32,9 +32,9 @@ function usage {
   build VERSION [OPTIONS]
 
 Versions:
-  26                    Emacs 26 - emacs-plus@26 - current release
-  27                    Emacs 27 - emacs-plus@27 - next release
-  28                    Emacs 27 - emacs-plus@28 - development
+  26                    Emacs 26 - emacs-plus@26 - previous release
+  27                    Emacs 27 - emacs-plus@27 - current release
+  28                    Emacs 28 - emacs-plus@28 - development
 
 Consult each formula for the list of available options.
 "
