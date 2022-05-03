@@ -1,75 +1,62 @@
-From 00c789cad83609b606f5df74d4337f3c449c94c9 Mon Sep 17 00:00:00 2001
+From a5e9337211b6569e7d8cef32c4aee38d54d60e4a Mon Sep 17 00:00:00 2001
 From: Mingkai Dong <mk@dong.mk>
 Date: Sat, 30 Apr 2022 12:47:43 +0800
-Subject: [PATCH] Add top-bar (cloned from tab-bar) for NS
+Subject: [PATCH 2/2] Add support for top-bar
+
+Clone tab-bar as top-bar for NS
 
 Complete top-bar to make it usable
 
 Fix events on top-bar
+
+force full top-bar redisplay
+
+(force-mode-line-update) can also update the top-bar.
+
+Add top-bar-current-frame for top-bar format
+
+remove top-bar-mode and fix top-bar on make-frame
+
+let the default top-bar follow frame decoration
+
+fix default top-bar following frame decoration
+
+top-bar: make top bar above the tab bar
 ---
- lisp/cus-start.el |  15 +++
- lisp/faces.el     |  13 +++
- lisp/frame.el     |  44 ++++++++
+ lisp/cus-start.el |   2 +
+ lisp/faces.el     |  13 ++
+ lisp/frame.el     |  37 +++++
  lisp/loadup.el    |   1 +
  lisp/mouse.el     |   2 +-
  lisp/paren.el     |   2 +
- lisp/speedbar.el  |   1 +
- lisp/startup.el   |   1 +
- lisp/subr.el      |   7 ++
- lisp/top-bar.el   | 121 +++++++++++++++++++++
+ lisp/subr.el      |   7 +
+ lisp/top-bar.el   | 119 +++++++++++++++
  lisp/window.el    |   5 +-
- src/dispextern.h  |  47 ++++++++
- src/dispnew.c     |  67 ++++++++++++
- src/frame.c       |  78 +++++++++++++-
- src/frame.h       |  44 +++++++-
- src/keyboard.c    |  47 ++++++--
+ src/dispextern.h  |  47 ++++++
+ src/dispnew.c     |  76 ++++++++++
+ src/frame.c       |  70 ++++++++-
+ src/frame.h       |  44 +++++-
+ src/keyboard.c    |  51 +++++--
  src/keymap.c      |   2 +-
  src/lisp.h        |   1 +
  src/menu.c        |   4 +
- src/nsfns.m       |  91 +++++++++++++++-
+ src/nsfns.m       | 112 +++++++++++++-
  src/nsterm.h      |   1 +
- src/nsterm.m      |  60 ++++++++++-
- src/termhooks.h   |   8 ++
- src/window.c      |  23 +++-
- src/window.h      |  15 ++-
- src/xdisp.c       | 268 +++++++++++++++++++++++++++++++++++++++++++++-
- src/xfaces.c      |   4 +
- src/xterm.c       |  13 +++
- 28 files changed, 957 insertions(+), 28 deletions(-)
+ src/nsterm.m      |  60 +++++++-
+ src/termhooks.h   |   8 +
+ src/window.c      |  23 ++-
+ src/window.h      |  15 +-
+ src/xdisp.c       | 361 +++++++++++++++++++++++++++++++++++++++++++++-
+ src/xfaces.c      |   3 +
+ src/xterm.c       |  13 ++
+ 26 files changed, 1047 insertions(+), 32 deletions(-)
  create mode 100644 lisp/top-bar.el
 
 diff --git a/lisp/cus-start.el b/lisp/cus-start.el
-index 83ab61b28b..3710bc7121 100644
+index 0e1cb4589d..d87add00a7 100644
 --- a/lisp/cus-start.el
 +++ b/lisp/cus-start.el
-@@ -338,6 +338,9 @@ minibuffer-prompt-properties--setter
- 	     (tab-bar-mode tab-bar boolean nil
-                            ;; :initialize custom-initialize-default
- 			   :set custom-set-minor-mode)
-+	     (top-bar-mode top-bar boolean nil
-+                           ;; :initialize custom-initialize-default
-+			   :set custom-set-minor-mode)
- 	     (tool-bar-mode (frames mouse) boolean nil
-                             ;; :initialize custom-initialize-default
- 			    :set custom-set-minor-mode)
-@@ -704,6 +707,16 @@ minibuffer-prompt-properties--setter
-                      ;; Redraw the bars:
-                      (tab-bar-mode -1)
-                      (tab-bar-mode 1)))
-+             (top-bar-position
-+              top-bar (choice
-+                       (const :tag "Top bar above tool bar" nil)
-+                       (const :tag "Top bar below tool bar" t))
-+              "27.1"
-+              :set (lambda (sym val)
-+                     (set-default sym val)
-+                     ;; Redraw the bars:
-+                     (top-bar-mode -1)
-+                     (top-bar-mode 1)))
- 	     (auto-hscroll-mode scrolling
-                                 (choice
-                                  (const :tag "Don't scroll automatically"
-@@ -888,6 +901,8 @@ minibuffer-prompt-properties--setter
+@@ -898,6 +898,8 @@ minibuffer-prompt-properties--setter
  		       (fboundp 'x-create-frame))
  		      ((string-match "tab-bar-" (symbol-name symbol))
  		       (fboundp 'x-create-frame))
@@ -79,10 +66,10 @@ index 83ab61b28b..3710bc7121 100644
  			      (symbol-name symbol))
  		       ;; Any function from fontset.c will do.
 diff --git a/lisp/faces.el b/lisp/faces.el
-index 12a386c8f6..fb339f2c8d 100644
+index 0418cd4c05..c1b88268ab 100644
 --- a/lisp/faces.el
 +++ b/lisp/faces.el
-@@ -2901,6 +2901,19 @@ tab-bar
+@@ -2910,6 +2910,19 @@ tab-bar
    :version "27.1"
    :group 'basic-faces)
  
@@ -103,10 +90,10 @@ index 12a386c8f6..fb339f2c8d 100644
    '((((class color) (min-colors 88))
       :inherit variable-pitch
 diff --git a/lisp/frame.el b/lisp/frame.el
-index 83e67dac4e..128b0446e8 100644
+index 9476cb0ec4..ddac62f0d5 100644
 --- a/lisp/frame.el
 +++ b/lisp/frame.el
-@@ -405,6 +405,48 @@ frame-notice-user-settings
+@@ -405,6 +405,41 @@ frame-notice-user-settings
  				(eq 0 (cdr other-lines)))))
  	      (tab-bar-mode -1)))))
  
@@ -127,10 +114,9 @@ index 83e67dac4e..128b0446e8 100644
 +	  ;; or top bar mode has been explicitly turned off in the
 +	  ;; user's init file.
 +	  (when (and (> height 0)
-+		     (or (and lines
-+			      (or (null (cdr lines))
-+				  (eq 0 (cdr lines))))
-+			 (not top-bar-mode)))
++                     (and lines
++                          (or (null (cdr lines))
++                              (eq 0 (cdr lines))))))
 +	    (let* ((initial-top
 +		    (cdr (assq 'top frame-initial-geometry-arguments)))
 +		   (top (frame-parameter frame-initial-frame 'top)))
@@ -144,18 +130,12 @@ index 83e67dac4e..128b0446e8 100644
 +			(t (+ top height)))))
 +		  (modify-frame-parameters
 +		   frame-initial-frame `((top . ,adjusted-top))))))
-+	    ;; Reset `top-bar-mode' when zero top bar lines have been
-+	    ;; requested for the window-system or default frame alists.
-+	    (when (and top-bar-mode
-+		       (and other-lines
-+			    (or (null (cdr other-lines))
-+				(eq 0 (cdr other-lines)))))
-+	      (top-bar-mode -1)))))
++	    ))
 +
        ;; When tool-bar has been switched off, correct the frame size
        ;; by the lines added in x-create-frame for the tool-bar and
        ;; switch `tool-bar-mode' off.
-@@ -1402,6 +1444,7 @@ frame-inner-height
+@@ -1402,6 +1437,7 @@ frame-inner-height
    (setq frame (window-normalize-frame frame))
    (- (frame-native-height frame)
       (if (fboundp 'tab-bar-height) (tab-bar-height frame t) 0)
@@ -163,7 +143,7 @@ index 83e67dac4e..128b0446e8 100644
       (* 2 (frame-internal-border-width frame))))
  
  (defun frame-outer-width (&optional frame)
-@@ -1714,6 +1757,7 @@ frame-geometry
+@@ -1714,6 +1750,7 @@ frame-geometry
         '(tool-bar-position . nil)
         '(tool-bar-size 0 . 0)
         '(tab-bar-size 0 . 0)
@@ -172,10 +152,10 @@ index 83e67dac4e..128b0446e8 100644
  	     (frame-parameter frame 'internal-border-width)))))))
  
 diff --git a/lisp/loadup.el b/lisp/loadup.el
-index 6ca699f901..43aa713c7b 100644
+index 21a87dbd77..08e7d4ffd0 100644
 --- a/lisp/loadup.el
 +++ b/lisp/loadup.el
-@@ -272,6 +272,7 @@
+@@ -275,6 +275,7 @@
  
  (load "menu-bar")
  (load "tab-bar")
@@ -184,10 +164,10 @@ index 6ca699f901..43aa713c7b 100644
  (load "textmodes/page")
  (load "register")
 diff --git a/lisp/mouse.el b/lisp/mouse.el
-index c08ecaf334..2783dfea94 100644
+index ddcb51aecf..fc0c7bcad3 100644
 --- a/lisp/mouse.el
 +++ b/lisp/mouse.el
-@@ -1519,7 +1519,7 @@ mouse-posn-property
+@@ -1584,7 +1584,7 @@ mouse-posn-property
              ;; don't look up that position's properties!
              (and pt (not (memq (posn-area pos)
                                 '(left-fringe right-fringe
@@ -197,10 +177,10 @@ index c08ecaf334..2783dfea94 100644
      (get-char-property pos property)))
  
 diff --git a/lisp/paren.el b/lisp/paren.el
-index 4e67a4ea4f..a2e8e4f96e 100644
+index 4c268dbf77..2eff8a2099 100644
 --- a/lisp/paren.el
 +++ b/lisp/paren.el
-@@ -295,6 +295,7 @@ show-paren--context-child-frame-buffer
+@@ -302,6 +302,7 @@ show-paren--context-child-frame-buffer
                     (header-line-format . nil)
                     (tab-line-format . nil)
                     (tab-bar-format . nil) ;; Emacs 28 tab-bar-format
@@ -208,7 +188,7 @@ index 4e67a4ea4f..a2e8e4f96e 100644
                     (frame-title-format . "")
                     (truncate-lines . t)
                     (cursor-in-non-selected-windows . nil)
-@@ -330,6 +331,7 @@ show-paren--context-child-frame-parameters
+@@ -337,6 +338,7 @@ show-paren--context-child-frame-parameters
      (menu-bar-lines . 0)
      (tool-bar-lines . 0)
      (tab-bar-lines . 0)
@@ -216,35 +196,11 @@ index 4e67a4ea4f..a2e8e4f96e 100644
      (no-other-frame . t)
      (no-other-window . t)
      (no-delete-other-windows . t)
-diff --git a/lisp/speedbar.el b/lisp/speedbar.el
-index b2e7be1505..45d723d208 100644
---- a/lisp/speedbar.el
-+++ b/lisp/speedbar.el
-@@ -1042,6 +1042,7 @@ speedbar-mode
- 	  dframe-mouse-click-function #'speedbar-click
- 	  dframe-mouse-position-function #'speedbar-position-cursor-on-line)
-     (setq-local tab-bar-mode nil)
-+    (setq-local top-bar-mode nil)
-     (setq tab-line-exclude nil))
-   speedbar-buffer)
- 
-diff --git a/lisp/startup.el b/lisp/startup.el
-index 57a38a295e..866f3e1b6f 100644
---- a/lisp/startup.el
-+++ b/lisp/startup.el
-@@ -1425,6 +1425,7 @@ command-line
-     (if (or noninteractive emacs-basic-display)
- 	(setq menu-bar-mode nil
- 	      tab-bar-mode nil
-+	      top-bar-mode nil
- 	      tool-bar-mode nil))
-     (frame-initialize))
- 
 diff --git a/lisp/subr.el b/lisp/subr.el
-index 9623ea63b5..a64312230b 100644
+index 1a16d78117..51293e2686 100644
 --- a/lisp/subr.el
 +++ b/lisp/subr.el
-@@ -1395,6 +1395,9 @@ 'ctl-x-5-prefix
+@@ -1449,6 +1449,9 @@ 'ctl-x-5-prefix
  (defvar tab-prefix-map (make-sparse-keymap)
    "Keymap for tab-bar related commands.")
  
@@ -254,7 +210,7 @@ index 9623ea63b5..a64312230b 100644
  (defvar ctl-x-map
    (let ((map (make-keymap)))
      (define-key map "4" 'ctl-x-4-prefix)
-@@ -2804,6 +2807,10 @@ read-key
+@@ -2955,6 +2958,10 @@ read-key
  	       ;; This hack avoids evaluating the :filter (Bug#9922).
  	       (or (cdr (assq 'tab-bar global-map))
  		   (lookup-key global-map [tab-bar])))
@@ -267,10 +223,10 @@ index 9623ea63b5..a64312230b 100644
  	       (or (cdr (assq 'tool-bar global-map))
 diff --git a/lisp/top-bar.el b/lisp/top-bar.el
 new file mode 100644
-index 0000000000..996fdfde46
+index 0000000000..9caeacc1d5
 --- /dev/null
 +++ b/lisp/top-bar.el
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,119 @@
 +;;; top-bar.el --- frame-local top-bar -*- lexical-binding: t; -*-
 +
 +;; Author: Mingkai Dong <mk@dong.mk>
@@ -336,7 +292,7 @@ index 0000000000..996fdfde46
 +  ;; It's defined in C/cus-start, this stops the d-m-m macro defining it again.
 +  :variable top-bar-mode
 +
-+  (top-bar-format-set "    HILO")
++  (top-bar-format-set "    Emacs Top Bar")
 +  ;; Recalculate `top-bar-lines' for all frames
 +  (top-bar--update-top-bar-lines t)
 +  )
@@ -383,9 +339,7 @@ index 0000000000..996fdfde46
 +
 +(defun top-bar-format-set (format-string &optional frame)
 +  "Set top bar FORMAT-STRING on the FRAME."
-+  (set-frame-parameter frame 'top-bar-format (propertize format-string
-+                                                         'keymap top-bar-map))
-+  (set-frame-parameter frame 'top-bar-lines 1))
++  (set-frame-parameter frame 'top-bar-format format-string))
 +
 +
 +
@@ -393,7 +347,7 @@ index 0000000000..996fdfde46
 +
 +;;; top-bar.el ends here
 diff --git a/lisp/window.el b/lisp/window.el
-index dc33eb8a12..2713a8cddf 100644
+index 4d88ffa903..94e9cfc89e 100644
 --- a/lisp/window.el
 +++ b/lisp/window.el
 @@ -1446,10 +1446,13 @@ window--dump-frame
@@ -412,10 +366,10 @@ index dc33eb8a12..2713a8cddf 100644
  		   (tool-bar-height frame t)
  		 "0")
 diff --git a/src/dispextern.h b/src/dispextern.h
-index e9b19a7f13..f6ea85f39b 100644
+index 037e02ff58..54e8ea6e08 100644
 --- a/src/dispextern.h
 +++ b/src/dispextern.h
-@@ -1853,6 +1853,7 @@ #define FACE_UNIBYTE_P(FACE) ((FACE)->charset < 0)
+@@ -1856,6 +1856,7 @@ #define FACE_UNIBYTE_P(FACE) ((FACE)->charset < 0)
    CHILD_FRAME_BORDER_FACE_ID,
    TAB_BAR_FACE_ID,
    TAB_LINE_FACE_ID,
@@ -423,7 +377,7 @@ index e9b19a7f13..f6ea85f39b 100644
    BASIC_FACE_ID_SENTINEL
  };
  
-@@ -3250,6 +3251,50 @@ #define DEFAULT_TAB_BAR_BUTTON_RELIEF 1
+@@ -3261,6 +3262,50 @@ #define DEFAULT_TAB_BAR_BUTTON_RELIEF 1
  
  #define DEFAULT_TAB_BAR_IMAGE_HEIGHT 18
  
@@ -474,7 +428,7 @@ index e9b19a7f13..f6ea85f39b 100644
  
  /***********************************************************************
  			       Tool-bars
-@@ -3458,6 +3503,8 @@ #define TTY_CAP_STRIKE_THROUGH	0x20
+@@ -3474,6 +3519,8 @@ #define TTY_CAP_STRIKE_THROUGH	0x20
  
  extern Lisp_Object handle_tab_bar_click (struct frame *,
  					 int, int, bool, int);
@@ -484,7 +438,7 @@ index e9b19a7f13..f6ea85f39b 100644
                                     int, int, bool, int);
  extern void handle_tool_bar_click_with_device (struct frame *, int, int, bool,
 diff --git a/src/dispnew.c b/src/dispnew.c
-index 2aba0edfe8..848fee8c8a 100644
+index 53a47c4b2f..ef2b44401d 100644
 --- a/src/dispnew.c
 +++ b/src/dispnew.c
 @@ -800,6 +800,9 @@ clear_current_matrices (register struct frame *f)
@@ -506,10 +460,10 @@ index 2aba0edfe8..848fee8c8a 100644
  #endif
  
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
-@@ -2196,6 +2201,35 @@ adjust_frame_glyphs_for_window_redisplay (struct frame *f)
-     w->pixel_height = FRAME_TAB_BAR_HEIGHT (f);
-     allocate_matrices_for_window_redisplay (w);
-   }
+@@ -2191,6 +2196,34 @@ adjust_frame_glyphs_for_window_redisplay (struct frame *f)
+ #endif
+ 
+ #if defined (HAVE_WINDOW_SYSTEM)
 +  {
 +    /* Allocate/ reallocate matrices of the top bar window.  If we
 +       don't have a top bar window yet, make one.  */
@@ -528,10 +482,9 @@ index 2aba0edfe8..848fee8c8a 100644
 +
 +    w->pixel_left = 0;
 +    w->left_col = 0;
-+    w->pixel_top = FRAME_MENU_BAR_HEIGHT (f)
-+      + FRAME_TOOL_BAR_HEIGHT (f) + FRAME_TAB_BAR_HEIGHT (f);
-+    w->top_line = FRAME_MENU_BAR_LINES (f)
-+      + FRAME_TOOL_BAR_LINES (f) + FRAME_TAB_BAR_LINES (f);
++
++    w->pixel_top = FRAME_MENU_BAR_HEIGHT (f);
++    w->top_line = FRAME_MENU_BAR_LINES (f);
 +    w->total_cols = FRAME_TOTAL_COLS (f);
 +    w->pixel_width = (FRAME_PIXEL_WIDTH (f)
 +		       - 2 * FRAME_INTERNAL_BORDER_WIDTH (f));
@@ -539,10 +492,32 @@ index 2aba0edfe8..848fee8c8a 100644
 +    w->pixel_height = FRAME_TOP_BAR_HEIGHT (f);
 +    allocate_matrices_for_window_redisplay (w);
 +  }
- #endif
- 
- #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
-@@ -2292,6 +2326,15 @@ free_glyphs (struct frame *f)
+   {
+     /* Allocate/ reallocate matrices of the tab bar window.  If we
+        don't have a tab bar window yet, make one.  */
+@@ -2210,8 +2243,10 @@ adjust_frame_glyphs_for_window_redisplay (struct frame *f)
+     w->pixel_left = 0;
+     w->left_col = 0;
+     w->pixel_top = FRAME_MENU_BAR_HEIGHT (f)
++      + FRAME_TOP_BAR_HEIGHT (f)
+       + (!NILP (Vtab_bar_position) ? FRAME_TOOL_BAR_HEIGHT (f) : 0);
+     w->top_line = FRAME_MENU_BAR_LINES (f)
++      + FRAME_TOP_BAR_LINES (f)
+       + (!NILP (Vtab_bar_position) ? FRAME_TOOL_BAR_LINES (f) : 0);
+     w->total_cols = FRAME_TOTAL_COLS (f);
+     w->pixel_width = (FRAME_PIXEL_WIDTH (f)
+@@ -2242,8 +2277,10 @@ adjust_frame_glyphs_for_window_redisplay (struct frame *f)
+     w->pixel_left = 0;
+     w->left_col = 0;
+     w->pixel_top = FRAME_MENU_BAR_HEIGHT (f)
++      + FRAME_TOP_BAR_HEIGHT (f)
+       + (NILP (Vtab_bar_position) ? FRAME_TAB_BAR_HEIGHT (f) : 0);
+     w->top_line = FRAME_MENU_BAR_LINES (f)
++      + FRAME_TOP_BAR_LINES (f)
+       + (NILP (Vtab_bar_position) ? FRAME_TAB_BAR_LINES (f) : 0);
+     w->total_cols = FRAME_TOTAL_COLS (f);
+     w->pixel_width = (FRAME_PIXEL_WIDTH (f)
+@@ -2316,6 +2353,15 @@ free_glyphs (struct frame *f)
  	  w->desired_matrix = w->current_matrix = NULL;
  	  fset_tab_bar_window (f, Qnil);
  	}
@@ -558,7 +533,7 @@ index 2aba0edfe8..848fee8c8a 100644
  #endif
  
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
-@@ -3213,6 +3256,30 @@ update_frame (struct frame *f, bool force_p, bool inhibit_hairy_id_p)
+@@ -3250,6 +3296,36 @@ update_frame (struct frame *f, bool force_p, bool inhibit_hairy_id_p)
  	      fset_desired_tab_bar_string (f, tem);
  	    }
  	}
@@ -567,6 +542,9 @@ index 2aba0edfe8..848fee8c8a 100644
 +	{
 +	  struct window *w = XWINDOW (f->top_bar_window);
 +
++	  /* NOTE(mkvoya):
++	  printf("[%s] must_be_updated_p=%d\n", __func__, w->must_be_updated_p);
++	  */
 +	  /* Update top-bar window.  */
 +	  if (w->must_be_updated_p)
 +	    {
@@ -578,10 +556,13 @@ index 2aba0edfe8..848fee8c8a 100644
 +	      /* Swap tab-bar strings.  We swap because we want to
 +		 reuse strings.  */
 +	      tem = f->current_top_bar_string;
-+	      printf("update: %s => %s\n",
++	      /* NOTE(mkvoya):
++	      printf("[%s] update: %s => %s\n",
++		     __func__,
 +		     NILP(tem) ? "NIL" : SSDATA(tem),
 +		     NILP(f->desired_top_bar_string) ? "NIL" :
 +		     SSDATA(f->desired_top_bar_string));
++	      */
 +	      fset_current_top_bar_string (f, f->desired_top_bar_string);
 +	      fset_desired_top_bar_string (f, tem);
 +	    }
@@ -590,7 +571,7 @@ index 2aba0edfe8..848fee8c8a 100644
  
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
 diff --git a/src/frame.c b/src/frame.c
-index 5336b3c563..86d2786995 100644
+index 64b0df8c66..d1ac814eac 100644
 --- a/src/frame.c
 +++ b/src/frame.c
 @@ -71,6 +71,9 @@ Copyright (C) 1993-1995, 1997, 1999-2022 Free Software Foundation, Inc.
@@ -631,14 +612,14 @@ index 5336b3c563..86d2786995 100644
  
  Lisp_Object Vframe_list;
  
-@@ -374,6 +398,7 @@ frame_windows_min_size (Lisp_Object frame, Lisp_Object horizontal,
+@@ -373,6 +397,7 @@ frame_windows_min_size (Lisp_Object frame, Lisp_Object horizontal,
+   if ((FRAME_TERMCAP_P (f) || FRAME_MSDOS_P (f)) && NILP (horizontal))
      {
        int min_height = (FRAME_MENU_BAR_LINES (f)
- 			+ FRAME_TAB_BAR_LINES (f)
 +			+ FRAME_TOP_BAR_LINES (f)
+ 			+ FRAME_TAB_BAR_LINES (f)
  			+ FRAME_WANTS_MODELINE_P (f)
  			+ 2);	/* one text line and one echo-area line */
- 
 @@ -839,6 +864,12 @@ adjust_frame_size (struct frame *f, int new_text_width, int new_text_height,
  	  XWINDOW (f->tab_bar_window)->total_cols
  	    = new_inner_width / unit_width;
@@ -665,8 +646,8 @@ index 5336b3c563..86d2786995 100644
    /* The default value of tab-bar-mode is nil.  */
    set_tab_bar_lines (f, make_fixnum (0), Qnil);
  
-+  /* The default value of top-bar-mode is nil.  */
-+  set_top_bar_lines (f, make_fixnum (0), Qnil);
++  /* The default value of top-bar-mode is t.  */
++  set_top_bar_lines (f, make_fixnum (1), Qnil);
 +
    /* Allocate glyph matrices.  */
    adjust_frame_glyphs (f);
@@ -675,38 +656,38 @@ index 5336b3c563..86d2786995 100644
  
    FRAME_MENU_BAR_LINES (f) = NILP (Vmenu_bar_mode) ? 0 : 1;
    FRAME_TAB_BAR_LINES (f) = NILP (Vtab_bar_mode) ? 0 : 1;
-+  FRAME_TOP_BAR_LINES (f) = NILP (Vtop_bar_mode) ? 0 : 1;
++  FRAME_TOP_BAR_LINES (f) = 1;
    FRAME_LINES (f) = FRAME_LINES (f) - FRAME_MENU_BAR_LINES (f)
 -    - FRAME_TAB_BAR_LINES (f);
-+    - FRAME_TAB_BAR_LINES (f) - FRAME_TOP_BAR_LINES (f);
++    - FRAME_TOP_BAR_LINES (f) - FRAME_TAB_BAR_LINES (f);
    FRAME_MENU_BAR_HEIGHT (f) = FRAME_MENU_BAR_LINES (f) * FRAME_LINE_HEIGHT (f);
-   FRAME_TAB_BAR_HEIGHT (f) = FRAME_TAB_BAR_LINES (f) * FRAME_LINE_HEIGHT (f);
 +  FRAME_TOP_BAR_HEIGHT (f) = FRAME_TOP_BAR_LINES (f) * FRAME_LINE_HEIGHT (f);
+   FRAME_TAB_BAR_HEIGHT (f) = FRAME_TAB_BAR_LINES (f) * FRAME_LINE_HEIGHT (f);
    FRAME_TEXT_HEIGHT (f) = FRAME_TEXT_HEIGHT (f) - FRAME_MENU_BAR_HEIGHT (f)
 -    - FRAME_TAB_BAR_HEIGHT (f);
-+    - FRAME_TAB_BAR_HEIGHT (f) - FRAME_TOP_BAR_HEIGHT (f);
++    - FRAME_TOP_BAR_HEIGHT (f) - FRAME_TAB_BAR_HEIGHT (f);
  
    /* Set the top frame to the newly created frame.  */
    if (FRAMEP (FRAME_TTY (f)->top_frame)
-@@ -3229,6 +3267,8 @@ store_frame_param (struct frame *f, Lisp_Object prop, Lisp_Object val)
+@@ -3210,6 +3248,8 @@ store_frame_param (struct frame *f, Lisp_Object prop, Lisp_Object val)
+     {
+       if (EQ (prop, Qmenu_bar_lines))
  	set_menu_bar_lines (f, val, make_fixnum (FRAME_MENU_BAR_LINES (f)));
-       else if (EQ (prop, Qtab_bar_lines))
- 	set_tab_bar_lines (f, val, make_fixnum (FRAME_TAB_BAR_LINES (f)));
 +      else if (EQ (prop, Qtop_bar_lines))
 +	set_top_bar_lines (f, val, make_fixnum (FRAME_TOP_BAR_LINES (f)));
+       else if (EQ (prop, Qtab_bar_lines))
+ 	set_tab_bar_lines (f, val, make_fixnum (FRAME_TAB_BAR_LINES (f)));
        else if (EQ (prop, Qname))
- 	set_term_frame_name (f, val);
-     }
-@@ -3332,6 +3372,8 @@ DEFUN ("frame-parameters", Fframe_parameters, Sframe_parameters, 0, 1, 0,
+@@ -3313,6 +3353,8 @@ DEFUN ("frame-parameters", Fframe_parameters, Sframe_parameters, 0, 1, 0,
+ 
+       XSETFASTINT (lines, FRAME_MENU_BAR_LINES (f));
        store_in_alist (&alist, Qmenu_bar_lines, lines);
-       XSETFASTINT (lines, FRAME_TAB_BAR_LINES (f));
-       store_in_alist (&alist, Qtab_bar_lines, lines);
 +      XSETFASTINT (lines, FRAME_TOP_BAR_LINES (f));
 +      store_in_alist (&alist, Qtop_bar_lines, lines);
+       XSETFASTINT (lines, FRAME_TAB_BAR_LINES (f));
+       store_in_alist (&alist, Qtab_bar_lines, lines);
      }
- 
-   return alist;
-@@ -3913,6 +3955,8 @@ DEFUN ("frame-scale-factor", Fframe_scale_factor, Sframe_scale_factor,
+@@ -3896,6 +3938,8 @@ DEFUN ("frame-scale-factor", Fframe_scale_factor, Sframe_scale_factor,
    {"horizontal-scroll-bars",	SYMBOL_INDEX (Qhorizontal_scroll_bars)},
    {"visibility",		SYMBOL_INDEX (Qvisibility)},
    {"tab-bar-lines",		SYMBOL_INDEX (Qtab_bar_lines)},
@@ -715,7 +696,7 @@ index 5336b3c563..86d2786995 100644
    {"tool-bar-lines",		SYMBOL_INDEX (Qtool_bar_lines)},
    {"scroll-bar-foreground",	SYMBOL_INDEX (Qscroll_bar_foreground)},
    {"scroll-bar-background",	SYMBOL_INDEX (Qscroll_bar_background)},
-@@ -4688,6 +4732,9 @@ gui_set_font (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+@@ -4671,6 +4715,9 @@ gui_set_font (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
  #endif
    /* Recalculate tabbar height.  */
    f->n_tab_bar_rows = 0;
@@ -725,7 +706,7 @@ index 5336b3c563..86d2786995 100644
    /* Recalculate toolbar height.  */
    f->n_tool_bar_rows = 0;
  
-@@ -5645,7 +5692,7 @@ DEFUN ("x-parse-geometry", Fx_parse_geometry, Sx_parse_geometry, 1, 1, 0,
+@@ -5630,7 +5677,7 @@ DEFUN ("x-parse-geometry", Fx_parse_geometry, Sx_parse_geometry, 1, 1, 0,
  
  long
  gui_figure_window_size (struct frame *f, Lisp_Object parms, bool tabbar_p,
@@ -734,9 +715,9 @@ index 5336b3c563..86d2786995 100644
  {
    Lisp_Object height, width, user_size, top, left, user_position;
    long window_prompting = 0;
-@@ -5693,6 +5740,21 @@ gui_figure_window_size (struct frame *f, Lisp_Object parms, bool tabbar_p,
- 	}
-     }
+@@ -5644,6 +5691,21 @@ gui_figure_window_size (struct frame *f, Lisp_Object parms, bool tabbar_p,
+   f->top_pos = 0;
+   f->left_pos = 0;
  
 +  /* Calculate a top bar height so that the user gets a text display
 +     area of the size he specified with -g or via .Xdefaults.  Later
@@ -753,10 +734,10 @@ index 5336b3c563..86d2786995 100644
 +	FRAME_TOP_BAR_HEIGHT (f) = 0;
 +    }
 +
-   /* Calculate a tool bar height so that the user gets a text display
+   /* Calculate a tab bar height so that the user gets a text display
       area of the size he specified with -g or via .Xdefaults.  Later
-      changes of the tool bar height don't change the frame size.  This
-@@ -6185,6 +6247,8 @@ syms_of_frame (void)
+      changes of the tab bar height don't change the frame size.  This
+@@ -6170,6 +6232,8 @@ syms_of_frame (void)
    DEFSYM (Qline_spacing, "line-spacing");
    DEFSYM (Qmenu_bar_lines, "menu-bar-lines");
    DEFSYM (Qtab_bar_lines, "tab-bar-lines");
@@ -765,26 +746,11 @@ index 5336b3c563..86d2786995 100644
    DEFSYM (Qmouse_color, "mouse-color");
    DEFSYM (Qname, "name");
    DEFSYM (Qright_divider_width, "right-divider-width");
-@@ -6378,6 +6442,14 @@ syms_of_frame (void)
- or call the function `tab-bar-mode'.  */);
-   Vtab_bar_mode = Qnil;
- 
-+  DEFVAR_LISP ("top-bar-mode", Vtop_bar_mode,
-+               doc: /* Non-nil if Top-Bar mode is enabled.
-+See the command `top-bar-mode' for a description of this minor mode.
-+Setting this variable directly does not take effect;
-+either customize it (see the info node `Easy Customization')
-+or call the function `top-bar-mode'.  */);
-+  Vtop_bar_mode = Qnil;
-+
-   DEFVAR_LISP ("tool-bar-mode", Vtool_bar_mode,
-                doc: /* Non-nil if Tool-Bar mode is enabled.
- See the command `tool-bar-mode' for a description of this minor mode.
 diff --git a/src/frame.h b/src/frame.h
-index 94507209e6..cd1f5c9eeb 100644
+index f5654e9ce5..64da42bcb5 100644
 --- a/src/frame.h
 +++ b/src/frame.h
-@@ -189,10 +189,15 @@ #define EMACS_FRAME_H
+@@ -190,10 +190,15 @@ #define EMACS_FRAME_H
  #if defined (HAVE_WINDOW_SYSTEM)
    /* A window used to display the tab-bar of a frame.  */
    Lisp_Object tab_bar_window;
@@ -800,7 +766,7 @@ index 94507209e6..cd1f5c9eeb 100644
  #endif
  
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
-@@ -218,6 +223,9 @@ #define EMACS_FRAME_H
+@@ -219,6 +224,9 @@ #define EMACS_FRAME_H
    /* Desired and current tab-bar items.  */
    Lisp_Object tab_bar_items;
  
@@ -810,7 +776,7 @@ index 94507209e6..cd1f5c9eeb 100644
    /* Desired and current tool-bar items.  */
    Lisp_Object tool_bar_items;
    /* tool_bar_items should be the last Lisp_Object member.  */
-@@ -435,6 +443,8 @@ #define EMACS_FRAME_H
+@@ -436,6 +444,8 @@ #define EMACS_FRAME_H
       height.  */
    bool_bf tab_bar_redisplayed : 1;
    bool_bf tab_bar_resized : 1;
@@ -819,7 +785,7 @@ index 94507209e6..cd1f5c9eeb 100644
  
    /* Two sticky flags, that are both false when a frame is created.
       'redisplay_tool_bar' sets the former to true the first time it
-@@ -496,6 +506,11 @@ #define EMACS_FRAME_H
+@@ -497,6 +507,11 @@ #define EMACS_FRAME_H
    int n_tab_bar_rows;
    int n_tab_bar_items;
  
@@ -831,7 +797,7 @@ index 94507209e6..cd1f5c9eeb 100644
    /* Number of frame lines (rounded up) of tool bar.  */
    int tool_bar_lines;
  
-@@ -763,6 +778,11 @@ fset_tab_bar_items (struct frame *f, Lisp_Object val)
+@@ -764,6 +779,11 @@ fset_tab_bar_items (struct frame *f, Lisp_Object val)
  {
    f->tab_bar_items = val;
  }
@@ -843,7 +809,7 @@ index 94507209e6..cd1f5c9eeb 100644
  #if defined (HAVE_WINDOW_SYSTEM)
  INLINE void
  fset_tab_bar_window (struct frame *f, Lisp_Object val)
-@@ -779,6 +799,21 @@ fset_desired_tab_bar_string (struct frame *f, Lisp_Object val)
+@@ -780,6 +800,21 @@ fset_desired_tab_bar_string (struct frame *f, Lisp_Object val)
  {
    f->desired_tab_bar_string = val;
  }
@@ -865,7 +831,7 @@ index 94507209e6..cd1f5c9eeb 100644
  #endif /* HAVE_WINDOW_SYSTEM */
  INLINE void
  fset_tool_bar_items (struct frame *f, Lisp_Object val)
-@@ -980,6 +1015,10 @@ #define FRAME_MENU_BAR_HEIGHT(f) (f)->menu_bar_height
+@@ -981,6 +1016,10 @@ #define FRAME_MENU_BAR_HEIGHT(f) (f)->menu_bar_height
  #define FRAME_TAB_BAR_LINES(f) (f)->tab_bar_lines
  #define FRAME_TAB_BAR_HEIGHT(f) (f)->tab_bar_height
  
@@ -877,21 +843,21 @@ index 94507209e6..cd1f5c9eeb 100644
  #ifdef HAVE_EXT_TOOL_BAR
  #define FRAME_EXTERNAL_TOOL_BAR(f) (f)->external_tool_bar
 @@ -1002,12 +1041,14 @@ #define FRAME_TOOL_BAR_HEIGHT(f) (f)->tool_bar_height
+ /* Height of frame F's top margin in frame lines.  */
  #define FRAME_TOP_MARGIN(F)			\
    (FRAME_MENU_BAR_LINES (F)			\
-    + FRAME_TAB_BAR_LINES (F)			\
 +   + FRAME_TOP_BAR_LINES (F)			\
+    + FRAME_TAB_BAR_LINES (F)			\
     + FRAME_TOOL_BAR_LINES (F))
  
  /* Pixel height of frame F's top margin.  */
  #define FRAME_TOP_MARGIN_HEIGHT(F)		\
    (FRAME_MENU_BAR_HEIGHT (F)			\
-    + FRAME_TAB_BAR_HEIGHT (F)			\
 +   + FRAME_TOP_BAR_HEIGHT (F)			\
+    + FRAME_TAB_BAR_HEIGHT (F)			\
     + FRAME_TOOL_BAR_HEIGHT (F))
  
- /* True if frame F is currently visible.  */
-@@ -1305,6 +1346,7 @@ #define SET_FRAME_ICONIFIED(f, i)				\
+@@ -1326,6 +1367,7 @@ SET_FRAME_ICONIFIED (struct frame *f, int i)
  extern Lisp_Object old_selected_frame;
  
  extern int frame_default_tab_bar_height;
@@ -899,7 +865,7 @@ index 94507209e6..cd1f5c9eeb 100644
  
  #ifndef HAVE_EXT_TOOL_BAR
  extern int frame_default_tool_bar_height;
-@@ -1677,7 +1719,7 @@ #define EMACS_CLASS "Emacs"
+@@ -1698,7 +1740,7 @@ #define EMACS_CLASS "Emacs"
  extern void gui_set_scroll_bar_width (struct frame *, Lisp_Object, Lisp_Object);
  extern void gui_set_scroll_bar_height (struct frame *, Lisp_Object, Lisp_Object);
  
@@ -909,10 +875,10 @@ index 94507209e6..cd1f5c9eeb 100644
  extern void gui_set_alpha (struct frame *, Lisp_Object, Lisp_Object);
  extern void gui_set_alpha_background (struct frame *, Lisp_Object, Lisp_Object);
 diff --git a/src/keyboard.c b/src/keyboard.c
-index 19c8fdf1dc..0bb614297c 100644
+index 2863058d63..12309ff5ce 100644
 --- a/src/keyboard.c
 +++ b/src/keyboard.c
-@@ -2504,7 +2504,8 @@ read_char (int commandflag, Lisp_Object map,
+@@ -2499,7 +2499,8 @@ read_char (int commandflag, Lisp_Object map,
        if (used_mouse_menu
  	  /* Also check was_disabled so last-nonmenu-event won't return
  	     a bad value when submenus are involved.  (Bug#447)  */
@@ -922,7 +888,7 @@ index 19c8fdf1dc..0bb614297c 100644
  	      || was_disabled))
  	*used_mouse_menu = true;
  
-@@ -2787,6 +2788,7 @@ read_char (int commandflag, Lisp_Object map,
+@@ -2782,6 +2783,7 @@ read_char (int commandflag, Lisp_Object map,
        && EVENT_HAS_PARAMETERS (prev_event)
        && !EQ (XCAR (prev_event), Qmenu_bar)
        && !EQ (XCAR (prev_event), Qtab_bar)
@@ -930,7 +896,7 @@ index 19c8fdf1dc..0bb614297c 100644
        && !EQ (XCAR (prev_event), Qtool_bar)
        /* Don't bring up a menu if we already have another event.  */
        && !CONSP (Vunread_command_events))
-@@ -3043,7 +3045,8 @@ read_char (int commandflag, Lisp_Object map,
+@@ -3038,7 +3040,8 @@ read_char (int commandflag, Lisp_Object map,
        posn = POSN_POSN (xevent_start (c));
        /* Handle menu-bar events:
  	 insert the dummy prefix event `menu-bar'.  */
@@ -940,15 +906,15 @@ index 19c8fdf1dc..0bb614297c 100644
  	{
  	  /* Change menu-bar to (menu-bar) as the event "position".  */
  	  POSN_SET_POSN (xevent_start (c), list1 (posn));
-@@ -4251,6 +4254,7 @@ kbd_buffer_get_event (KBOARD **kbp,
+@@ -4256,6 +4259,7 @@ kbd_buffer_get_event (KBOARD **kbp,
+ 	      if (used_mouse_menu
  		  && !EQ (event->ie.frame_or_window, event->ie.arg)
  		  && (event->kind == MENU_BAR_EVENT
- 		      || event->kind == TAB_BAR_EVENT
 +		      || event->kind == TOP_BAR_EVENT
+ 		      || event->kind == TAB_BAR_EVENT
  		      || event->kind == TOOL_BAR_EVENT))
  		*used_mouse_menu = true;
- #endif
-@@ -5307,7 +5311,7 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
+@@ -5356,7 +5360,7 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
    int xret = 0, yret = 0;
    /* The window or frame under frame pixel coordinates (x,y)  */
    Lisp_Object window_or_frame = f
@@ -957,7 +923,7 @@ index 19c8fdf1dc..0bb614297c 100644
      : Qnil;
  #ifdef HAVE_WINDOW_SYSTEM
    bool tool_bar_p = false;
-@@ -5317,6 +5321,8 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
+@@ -5366,6 +5370,8 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
       tool bar.  */
    if (f && ((WINDOWP (f->tab_bar_window)
  	     && EQ (window_or_frame, f->tab_bar_window))
@@ -966,7 +932,7 @@ index 19c8fdf1dc..0bb614297c 100644
  #ifndef HAVE_EXT_TOOL_BAR
  	    || (WINDOWP (f->tool_bar_window)
  		&& EQ (window_or_frame, f->tool_bar_window))
-@@ -5337,7 +5343,8 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
+@@ -5386,7 +5392,8 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
  	 values of 'track-mouse' and their documentation in the Elisp
  	 manual.  */
        if (NILP (track_mouse) || EQ (track_mouse, Qt))
@@ -976,24 +942,29 @@ index 19c8fdf1dc..0bb614297c 100644
        /* Kludge alert: for mouse events on the tab bar and tool bar,
  	 keyboard.c wants the frame, not the special-purpose window
  	 we use to display those, and it wants frame-relative
-@@ -5369,6 +5376,16 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
-       window_or_frame = Qnil;	/* see above */
-     }
- 
-+  if (f
-+      && !FRAME_WINDOW_P (f)
+@@ -5410,9 +5417,19 @@ make_lispy_position (struct frame *f, Lisp_Object x, Lisp_Object y,
+ #endif
+   if (f
+       && !FRAME_WINDOW_P (f)
+-      && FRAME_TAB_BAR_LINES (f) > 0
 +      && FRAME_TOP_BAR_LINES (f) > 0
-+      && my >= FRAME_MENU_BAR_LINES (f) + FRAME_TAB_BAR_LINES (f)
-+      && my < FRAME_MENU_BAR_LINES (f) + FRAME_TAB_BAR_LINES (f) + FRAME_TOP_BAR_LINES (f))
+       && my >= FRAME_MENU_BAR_LINES (f)
+-      && my < FRAME_MENU_BAR_LINES (f) + FRAME_TAB_BAR_LINES (f))
++      && my < FRAME_MENU_BAR_LINES (f) + FRAME_TOP_BAR_LINES (f))
 +    {
 +      posn = Qtop_bar;
 +      window_or_frame = Qnil;	/* see above */
 +    }
 +
-   if (WINDOWP (window_or_frame))
++  if (f
++      && !FRAME_WINDOW_P (f)
++      && FRAME_TAB_BAR_LINES (f) > 0
++      && my >= FRAME_MENU_BAR_LINES (f) + FRAME_TOP_BAR_LINES (f)
++      && my < FRAME_MENU_BAR_LINES (f) + FRAME_TOP_BAR_LINES (f) + FRAME_TAB_BAR_LINES (f))
      {
-       /* It's a click in window WINDOW at frame coordinates (X,Y)  */
-@@ -5936,6 +5953,8 @@ make_lispy_event (struct input_event *event)
+       posn = Qtab_bar;
+       window_or_frame = Qnil;	/* see above */
+@@ -5985,6 +6002,8 @@ make_lispy_event (struct input_event *event)
  	       button information as OBJECT member of POSITION.  */
  	    if (CONSP (event->arg) && EQ (XCAR (event->arg), Qtab_bar))
  	      position = nconc2 (position, Fcons (XCDR (event->arg), Qnil));
@@ -1002,7 +973,7 @@ index 19c8fdf1dc..0bb614297c 100644
  	  }
  #ifndef USE_TOOLKIT_SCROLL_BARS
  	else
-@@ -6113,12 +6132,19 @@ make_lispy_event (struct input_event *event)
+@@ -6162,12 +6181,19 @@ make_lispy_event (struct input_event *event)
  	  /* Get the symbol we should use for the mouse click.  */
  	  Lisp_Object head;
  
@@ -1022,7 +993,7 @@ index 19c8fdf1dc..0bb614297c 100644
  	  if (event->modifiers & drag_modifier)
  	    return list3 (head, start_pos, position);
  	  else if (event->modifiers & (double_modifier | triple_modifier))
-@@ -6416,6 +6442,13 @@ make_lispy_event (struct input_event *event)
+@@ -6465,6 +6491,13 @@ make_lispy_event (struct input_event *event)
        /* Make an event (select-window (WINDOW)).  */
        return list2 (Qselect_window, list1 (event->frame_or_window));
  
@@ -1036,7 +1007,7 @@ index 19c8fdf1dc..0bb614297c 100644
      case TAB_BAR_EVENT:
      case TOOL_BAR_EVENT:
        {
-@@ -8693,8 +8726,6 @@ append_tab_bar_item (void)
+@@ -8745,8 +8778,6 @@ append_tab_bar_item (void)
  }
  
  
@@ -1045,7 +1016,7 @@ index 19c8fdf1dc..0bb614297c 100644
  
  /***********************************************************************
  			       Tool-bars
-@@ -9210,6 +9241,7 @@ read_char_x_menu_prompt (Lisp_Object map,
+@@ -9262,6 +9293,7 @@ read_char_x_menu_prompt (Lisp_Object map,
    if (EVENT_HAS_PARAMETERS (prev_event)
        && !EQ (XCAR (prev_event), Qmenu_bar)
        && !EQ (XCAR (prev_event), Qtab_bar)
@@ -1053,7 +1024,7 @@ index 19c8fdf1dc..0bb614297c 100644
        && !EQ (XCAR (prev_event), Qtool_bar))
      {
        /* Display the menu and get the selection.  */
-@@ -10199,7 +10231,8 @@ read_key_sequence (Lisp_Object *keybuf, Lisp_Object prompt,
+@@ -10251,7 +10283,8 @@ read_key_sequence (Lisp_Object *keybuf, Lisp_Object prompt,
  	      posn = POSN_POSN (xevent_start (key));
  	      /* Handle menu-bar events:
  		 insert the dummy prefix event `menu-bar'.  */
@@ -1064,10 +1035,10 @@ index 19c8fdf1dc..0bb614297c 100644
  		  if (READ_KEY_ELTS - t <= 1)
  		    error ("Key sequence too long");
 diff --git a/src/keymap.c b/src/keymap.c
-index da0a52bd2c..08af6b709e 100644
+index 506b755e5d..bc2272850e 100644
 --- a/src/keymap.c
 +++ b/src/keymap.c
-@@ -3398,7 +3398,7 @@ syms_of_keymap (void)
+@@ -3413,7 +3413,7 @@ syms_of_keymap (void)
    DEFSYM (Qmode_line, "mode-line");
  
    staticpro (&Vmouse_events);
@@ -1077,10 +1048,10 @@ index da0a52bd2c..08af6b709e 100644
  			     intern_c_string ("mouse-1"),
  			     intern_c_string ("mouse-2"),
 diff --git a/src/lisp.h b/src/lisp.h
-index 1ad89fc468..7eac3511f7 100644
+index 8fcc9b6e75..fdee112803 100644
 --- a/src/lisp.h
 +++ b/src/lisp.h
-@@ -4792,6 +4792,7 @@ fast_string_match_ignore_case (Lisp_Object regexp, Lisp_Object string)
+@@ -4819,6 +4819,7 @@ fast_string_match_ignore_case (Lisp_Object regexp, Lisp_Object string)
  #endif
  extern Lisp_Object menu_bar_items (Lisp_Object);
  extern Lisp_Object tab_bar_items (Lisp_Object, int *);
@@ -1089,7 +1060,7 @@ index 1ad89fc468..7eac3511f7 100644
  extern void discard_mouse_events (void);
  #if defined (USABLE_SIGIO) || defined (USABLE_SIGPOLL)
 diff --git a/src/menu.c b/src/menu.c
-index 398bf9329f..de85ded41b 100644
+index eeb0c9a7e5..8423ea3636 100644
 --- a/src/menu.c
 +++ b/src/menu.c
 @@ -1136,8 +1136,11 @@ x_popup_menu_1 (Lisp_Object position, Lisp_Object menu)
@@ -1113,10 +1084,10 @@ index 398bf9329f..de85ded41b 100644
      window = selected_window;
    else if (CONSP (position))
 diff --git a/src/nsfns.m b/src/nsfns.m
-index 3ead12d973..19d005751e 100644
+index 6038fa3333..679e82fccb 100644
 --- a/src/nsfns.m
 +++ b/src/nsfns.m
-@@ -668,6 +668,89 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -698,6 +698,93 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
  }
  
  
@@ -1184,6 +1155,8 @@ index 3ead12d973..19d005751e 100644
 +  else
 +    nlines = 0;
 +
++  /* printf("%s: olines=%d nlines=%d\n", __func__, olines, nlines); */
++
 +  if (nlines != olines && (olines == 0 || nlines == 0))
 +    ns_change_top_bar_height (f, nlines * FRAME_LINE_HEIGHT (f));
 +}
@@ -1197,6 +1170,8 @@ index 3ead12d973..19d005751e 100644
 +  if (FRAME_MINIBUF_ONLY_P (f))
 +    return;
 +
++  /* printf("%s: olines=%d\n", __func__, olines); */
++
 +  f->top_bar_format = value;
 +  /* FIXME(mkvoya): do anything else here? */
 +  ns_change_top_bar_height (f, olines * FRAME_LINE_HEIGHT (f));
@@ -1206,7 +1181,7 @@ index 3ead12d973..19d005751e 100644
  /* toolbar support */
  static void
  ns_set_tool_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
-@@ -988,6 +1071,8 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -1034,6 +1121,8 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
    gui_set_horizontal_scroll_bars, /* generic OK */
    gui_set_visibility, /* generic OK */
    ns_set_tab_bar_lines,
@@ -1215,18 +1190,33 @@ index 3ead12d973..19d005751e 100644
    ns_set_tool_bar_lines,
    0, /* x_set_scroll_bar_foreground, will ignore (not possible on NS) */
    0, /* x_set_scroll_bar_background,  will ignore (not possible on NS) */
-@@ -1381,6 +1466,10 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -1437,7 +1526,24 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+   gui_default_parameter (f, parms, Qtab_bar_lines,
                           NILP (Vtab_bar_mode)
                           ? make_fixnum (0) : make_fixnum (1),
- 			 NULL, NULL, RES_TYPE_NUMBER);
+-			 NULL, NULL, RES_TYPE_NUMBER);
++                         NULL, NULL, RES_TYPE_NUMBER);
++  /* The default top bar follows the frame decoration. */
 +  gui_default_parameter (f, parms, Qtop_bar_lines,
-+                         NILP (Vtop_bar_mode)
-+                         ? make_fixnum (0) : make_fixnum (1),
-+			 NULL, NULL, RES_TYPE_NUMBER);
++                         FRAME_UNDECORATED (f) ?
++                         make_fixnum (0) : make_fixnum (1),
++                         NULL, NULL, RES_TYPE_NUMBER);
++  if (FRAME_UNDECORATED (f)) {
++      AUTO_FRAME_ARG (arg, Qtop_bar_lines, make_fixnum (0));
++      gui_set_frame_parameters (f, arg);
++  }
++  gui_default_parameter (f, parms, Qtop_bar_format,
++                         FRAME_UNDECORATED (f) ?
++                         Qnil : build_string("     EMACS     "),
++                         NULL, NULL, RES_TYPE_STRING);
++  if (FRAME_UNDECORATED (f)) {
++      AUTO_FRAME_ARG (arg, Qtop_bar_format, Qnil);
++      gui_set_frame_parameters (f, arg);
++  }
    gui_default_parameter (f, parms, Qtool_bar_lines,
                           NILP (Vtool_bar_mode)
                           ? make_fixnum (0) : make_fixnum (1),
-@@ -1392,7 +1481,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -1449,7 +1555,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
                           RES_TYPE_STRING);
  
    parms = get_geometry_from_preferences (dpyinfo, parms);
@@ -1235,11 +1225,20 @@ index 3ead12d973..19d005751e 100644
  
    tem = gui_display_get_arg (dpyinfo, parms, Qunsplittable, 0, 0,
                               RES_TYPE_BOOLEAN);
+@@ -3075,7 +3181,7 @@ internalBorderWidth or internalBorder (which is what xterm calls
+                          "inhibitDoubleBuffering", "InhibitDoubleBuffering",
+                          RES_TYPE_BOOLEAN);
+ 
+-  gui_figure_window_size (f, parms, false, false);
++  gui_figure_window_size (f, parms, false, false, false);
+ 
+   block_input ();
+   [[EmacsView alloc] initFrameFromEmacs: f];
 diff --git a/src/nsterm.h b/src/nsterm.h
-index 09a7cc1755..0e87145aae 100644
+index 989698925c..afe0e3c10f 100644
 --- a/src/nsterm.h
 +++ b/src/nsterm.h
-@@ -1109,6 +1109,7 @@ ns_defined_color (struct frame *f,
+@@ -1159,6 +1159,7 @@ ns_defined_color (struct frame *f,
  extern void ns_set_scroll_bar_default_width (struct frame *f);
  extern void ns_set_scroll_bar_default_height (struct frame *f);
  extern void ns_change_tab_bar_height (struct frame *f, int height);
@@ -1248,10 +1247,10 @@ index 09a7cc1755..0e87145aae 100644
                                             const char *name,
                                             const char *class);
 diff --git a/src/nsterm.m b/src/nsterm.m
-index ff1a0470df..6bd08910e9 100644
+index e8f0293fbf..96efb50d0f 100644
 --- a/src/nsterm.m
 +++ b/src/nsterm.m
-@@ -5174,6 +5174,7 @@ static Lisp_Object ns_new_font (struct frame *f, Lisp_Object font_object,
+@@ -5482,6 +5482,7 @@ static Lisp_Object ns_new_font (struct frame *f, Lisp_Object font_object,
    terminal->delete_frame_hook = ns_destroy_window;
    terminal->delete_terminal_hook = ns_delete_terminal;
    terminal->change_tab_bar_height_hook = ns_change_tab_bar_height;
@@ -1259,7 +1258,7 @@ index ff1a0470df..6bd08910e9 100644
    /* Other hooks are NULL by default.  */
  
    return terminal;
-@@ -6823,6 +6824,8 @@ - (void)mouseDown: (NSEvent *)theEvent
+@@ -7395,6 +7396,8 @@ - (void)mouseDown: (NSEvent *)theEvent
      {
        Lisp_Object tab_bar_arg = Qnil;
        bool tab_bar_p = false;
@@ -1268,7 +1267,7 @@ index ff1a0470df..6bd08910e9 100644
  
        if (WINDOWP (emacsframe->tab_bar_window)
  	  && WINDOW_TOTAL_LINES (XWINDOW (emacsframe->tab_bar_window)))
-@@ -6831,7 +6834,7 @@ - (void)mouseDown: (NSEvent *)theEvent
+@@ -7403,7 +7406,7 @@ - (void)mouseDown: (NSEvent *)theEvent
  	  int x = lrint (p.x);
  	  int y = lrint (p.y);
  
@@ -1277,7 +1276,7 @@ index ff1a0470df..6bd08910e9 100644
  	  tab_bar_p = EQ (window, emacsframe->tab_bar_window);
  
  	  if (tab_bar_p)
-@@ -6839,8 +6842,57 @@ - (void)mouseDown: (NSEvent *)theEvent
+@@ -7412,8 +7415,57 @@ - (void)mouseDown: (NSEvent *)theEvent
  						EV_MODIFIERS (theEvent) | EV_UDMODIFIERS (theEvent));
  	}
  
@@ -1337,7 +1336,7 @@ index ff1a0470df..6bd08910e9 100644
        emacs_event->arg = tab_bar_arg;
        emacs_event->code = EV_BUTTON (theEvent);
        emacs_event->modifiers = EV_MODIFIERS (theEvent)
-@@ -6933,7 +6985,7 @@ - (void)mouseMoved: (NSEvent *)e
+@@ -7509,7 +7561,7 @@ - (void)mouseMoved: (NSEvent *)e
        NSTRACE_MSG ("mouse_autoselect_window");
        static Lisp_Object last_mouse_window;
        Lisp_Object window
@@ -1347,10 +1346,10 @@ index ff1a0470df..6bd08910e9 100644
        if (WINDOWP (window)
            && !EQ (window, last_mouse_window)
 diff --git a/src/termhooks.h b/src/termhooks.h
-index 8c193914ba..d83d6a109f 100644
+index c5f1e286e9..1953c6d4dd 100644
 --- a/src/termhooks.h
 +++ b/src/termhooks.h
-@@ -241,6 +241,11 @@ #define EMACS_TERMHOOKS_H
+@@ -223,6 +223,11 @@ #define EMACS_TERMHOOKS_H
       and `arg' are equal, this is a prefix event.  */
    TAB_BAR_EVENT,
  
@@ -1362,7 +1361,7 @@ index 8c193914ba..d83d6a109f 100644
    /* An event from a tool-bar.  Member `arg' of the input event
       contains the tool-bar item selected.  If `frame_or_window'
       and `arg' are equal, this is a prefix event.  */
-@@ -717,6 +722,9 @@ #define EVENT_INIT(event) (memset (&(event), 0, sizeof (struct input_event)), \
+@@ -705,6 +710,9 @@ #define EVENT_INIT(event) (memset (&(event), 0, sizeof (struct input_event)), \
    /* This hook is called to change the frame's (internal) tab-bar.  */
    void (*change_tab_bar_height_hook) (struct frame *f, int height);
  
@@ -1373,10 +1372,10 @@ index 8c193914ba..d83d6a109f 100644
    void (*change_tool_bar_height_hook) (struct frame *f, int height);
  
 diff --git a/src/window.c b/src/window.c
-index 48da783931..74b74b9cf5 100644
+index afb8f75537..bd187c9182 100644
 --- a/src/window.c
 +++ b/src/window.c
-@@ -1626,7 +1626,8 @@ check_window_containing (struct window *w, void *user_data)
+@@ -1659,7 +1659,8 @@ check_window_containing (struct window *w, void *user_data)
  
  Lisp_Object
  window_from_coordinates (struct frame *f, int x, int y,
@@ -1386,7 +1385,7 @@ index 48da783931..74b74b9cf5 100644
  {
    Lisp_Object window;
    struct check_window_data cw;
-@@ -1652,6 +1653,18 @@ window_from_coordinates (struct frame *f, int x, int y,
+@@ -1685,6 +1686,18 @@ window_from_coordinates (struct frame *f, int x, int y,
        *part = ON_TEXT;
        window = f->tab_bar_window;
      }
@@ -1405,7 +1404,7 @@ index 48da783931..74b74b9cf5 100644
  #endif
  
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
-@@ -1689,7 +1702,7 @@ DEFUN ("window-at", Fwindow_at, Swindow_at, 2, 3, 0,
+@@ -1722,7 +1735,7 @@ DEFUN ("window-at", Fwindow_at, Swindow_at, 2, 3, 0,
  				   + FRAME_INTERNAL_BORDER_WIDTH (f)),
  				  (FRAME_PIXEL_Y_FROM_CANON_Y (f, y)
  				   + FRAME_INTERNAL_BORDER_WIDTH (f)),
@@ -1414,7 +1413,7 @@ index 48da783931..74b74b9cf5 100644
  }
  
  ptrdiff_t
-@@ -6841,11 +6854,11 @@ DEFUN ("move-to-window-line", Fmove_to_window_line, Smove_to_window_line,
+@@ -6877,11 +6890,11 @@ DEFUN ("move-to-window-line", Fmove_to_window_line, Smove_to_window_line,
      int frame_cols, frame_lines;
      /* These three should get eventually replaced by their pixel
         counterparts.  */
@@ -1428,7 +1427,7 @@ index 48da783931..74b74b9cf5 100644
    } GCALIGNED_STRUCT;
  
  /* This is saved as a Lisp_Vector.  */
-@@ -7544,11 +7557,13 @@ redirection (see `redirect-frame-focus').  The variable
+@@ -7583,11 +7596,13 @@ redirection (see `redirect-frame-focus').  The variable
    data->frame_lines = FRAME_LINES (f);
    data->frame_menu_bar_lines = FRAME_MENU_BAR_LINES (f);
    data->frame_tab_bar_lines = FRAME_TAB_BAR_LINES (f);
@@ -1443,10 +1442,10 @@ index 48da783931..74b74b9cf5 100644
    data->selected_frame = selected_frame;
    data->current_window = FRAME_SELECTED_WINDOW (f);
 diff --git a/src/window.h b/src/window.h
-index 387a3be36a..be72910481 100644
+index 93817a9544..ed4d9f4664 100644
 --- a/src/window.h
 +++ b/src/window.h
-@@ -764,6 +764,15 @@ #define WINDOW_MENU_BAR_P(W) false
+@@ -758,6 +758,15 @@ #define WINDOW_MENU_BAR_P(W) false
  # define WINDOW_TAB_BAR_P(W) false
  #endif
  
@@ -1462,23 +1461,23 @@ index 387a3be36a..be72910481 100644
  /* True if W is a tool bar window.  */
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
  #define WINDOW_TOOL_BAR_P(W) \
-@@ -775,13 +784,13 @@ #define WINDOW_TOOL_BAR_P(W) false
+@@ -769,13 +778,13 @@ #define WINDOW_TOOL_BAR_P(W) false
  
  /* Return the frame y-position at which window W starts.  */
  #define WINDOW_TOP_EDGE_Y(W) \
 -  (((WINDOW_MENU_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOOL_BAR_P (W)) \
-+  (((WINDOW_MENU_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOP_BAR_P (W) || WINDOW_TOOL_BAR_P (W)) \
++  (((WINDOW_MENU_BAR_P (W) || WINDOW_TOP_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOOL_BAR_P (W)) \
      ? 0 : FRAME_INTERNAL_BORDER_WIDTH (WINDOW_XFRAME (W))) \
     + WINDOW_TOP_PIXEL_EDGE (W))
  
  /* Return the frame y-position before which window W ends.  */
  #define WINDOW_BOTTOM_EDGE_Y(W)				   \
 -  (((WINDOW_MENU_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOOL_BAR_P (W))	   \
-+  (((WINDOW_MENU_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOP_BAR_P (W) || WINDOW_TOOL_BAR_P (W)) \
++  (((WINDOW_MENU_BAR_P (W) || WINDOW_TOP_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOOL_BAR_P (W)) \
      ? 0 : FRAME_INTERNAL_BORDER_WIDTH (WINDOW_XFRAME (W))) \
     + WINDOW_BOTTOM_PIXEL_EDGE (W))
  
-@@ -1098,7 +1107,7 @@ #define WINDOW_TEXT_TO_FRAME_PIXEL_X(W, X)	\
+@@ -1092,7 +1101,7 @@ #define WINDOW_TEXT_TO_FRAME_PIXEL_X(W, X)	\
  
  extern Lisp_Object make_window (void);
  extern Lisp_Object window_from_coordinates (struct frame *, int, int,
@@ -1488,10 +1487,10 @@ index 387a3be36a..be72910481 100644
  extern void restore_window_configuration (Lisp_Object);
  extern void delete_all_child_windows (Lisp_Object);
 diff --git a/src/xdisp.c b/src/xdisp.c
-index 50efa50c55..9f4967582c 100644
+index 88a489e290..8395f3f6b7 100644
 --- a/src/xdisp.c
 +++ b/src/xdisp.c
-@@ -1120,6 +1120,7 @@ #define THIN_SPACE_WIDTH 1
+@@ -1129,6 +1129,7 @@ #define THIN_SPACE_WIDTH 1
  static const char *decode_mode_spec (struct window *, int, int, Lisp_Object *);
  static void display_menu_bar (struct window *);
  static void display_tab_bar (struct window *);
@@ -1499,7 +1498,7 @@ index 50efa50c55..9f4967582c 100644
  static void update_tab_bar (struct frame *, bool);
  static ptrdiff_t display_count_lines (ptrdiff_t, ptrdiff_t, ptrdiff_t,
  				      ptrdiff_t *);
-@@ -2730,7 +2731,7 @@ remember_mouse_glyph (struct frame *f, int gx, int gy, NativeRectangle *rect)
+@@ -2738,7 +2739,7 @@ remember_mouse_glyph (struct frame *f, int gx, int gy, NativeRectangle *rect)
        goto virtual_glyph;
      }
    else if (!f->glyphs_initialized_p
@@ -1508,7 +1507,7 @@ index 50efa50c55..9f4967582c 100644
  	       NILP (window)))
      {
        width = FRAME_SMALLEST_CHAR_WIDTH (f);
-@@ -13662,6 +13663,7 @@ update_tab_bar (struct frame *f, bool save_match_data)
+@@ -13866,6 +13867,7 @@ update_tab_bar (struct frame *f, bool save_match_data)
      }
  }
  
@@ -1516,7 +1515,7 @@ index 50efa50c55..9f4967582c 100644
  /* Redisplay the tab bar in the frame for window W.
  
     The tab bar of X frames that don't have X toolkit support is
-@@ -13765,6 +13767,23 @@ display_tab_bar (struct window *w)
+@@ -13969,6 +13971,99 @@ display_tab_bar (struct window *w)
    compute_line_metrics (&it);
  }
  
@@ -1533,14 +1532,90 @@ index 50efa50c55..9f4967582c 100644
 +static void
 +display_top_bar (struct window *w)
 +{
++  struct frame *f = XFRAME (WINDOW_FRAME (w));
++  struct it it;
++  Lisp_Object format = f->top_bar_format;
++  Lisp_Object top_bar_string;
++  int i;
++
 +  /* Don't do all this for graphical frames.  */
++#ifdef HAVE_NTGUI
++  if (FRAME_W32_P (f))
++    return;
++#endif
++#if defined (USE_X_TOOLKIT) || defined (USE_GTK)
++  if (FRAME_X_P (f))
++    return;
++#endif
++
++#ifdef HAVE_NS
++  if (FRAME_NS_P (f))
++    return;
++#endif /* HAVE_NS */
++
++#if defined (USE_X_TOOLKIT) || defined (USE_GTK)
++  eassert (!FRAME_WINDOW_P (f));
++  init_iterator (&it, w, -1, -1, f->desired_matrix->rows
++                 + (FRAME_MENU_BAR_LINES (f) > 0 ? 1 : 0),
++                 TOP_BAR_FACE_ID);
++  it.first_visible_x = 0;
++  it.last_visible_x = FRAME_PIXEL_WIDTH (f);
++#elif defined (HAVE_X_WINDOWS) /* X without toolkit.  */
++  if (FRAME_WINDOW_P (f))
++    {
++      /* Top bar lines are displayed in the desired matrix of the
++	 dummy window top_bar_window.  */
++      struct window *top_w;
++      top_w = XWINDOW (f->top_bar_window);
++      init_iterator (&it, top_w, -1, -1, top_w->desired_matrix->rows,
++		     TOP_BAR_FACE_ID);
++      it.first_visible_x = 0;
++      it.last_visible_x = FRAME_PIXEL_WIDTH (f);
++    }
++  else
++#endif /* not USE_X_TOOLKIT and not USE_GTK */
++    {
++      /* This is a TTY frame, i.e. character hpos/vpos are used as
++	 pixel x/y.  */
++      init_iterator (&it, w, -1, -1, f->desired_matrix->rows
++                     + (FRAME_MENU_BAR_LINES (f) > 0 ? 1 : 0),
++		     TOP_BAR_FACE_ID);
++      it.first_visible_x = 0;
++      it.last_visible_x = FRAME_COLS (f);
++    }
++
++  /* FIXME: This should be controlled by a user option.  See the
++     comments in redisplay_tool_bar and display_mode_line about
++     this.  */
++  it.paragraph_embedding = L2R;
++
++  /* Clear all rows of the top bar.  */
++  for (i = 0; i < FRAME_TOP_BAR_LINES (f); ++i)
++    {
++      struct glyph_row *row = it.glyph_row + i;
++      clear_glyph_row (row);
++      row->enabled_p = true;
++      row->full_width_p = true;
++      row->reversed_p = false;
++    }
++
++  /* Display all items of the top bar.  */
++  top_bar_string = Fformat_mode_line (format, Qnil, Qnil, Qnil);
++  display_string (NULL, top_bar_string, Qnil, 0, 0, &it,
++		  SCHARS (top_bar_string), 0, 0, STRING_MULTIBYTE (top_bar_string));
++  /* Fill out the line with spaces.  */
++  if (it.current_x < it.last_visible_x)
++    display_string ("", Qnil, Qnil, 0, 0, &it, -1, 0, 0, -1);
++
++  /* Compute the total height of the lines.  */
++  compute_line_metrics (&it);
 +  return;
 +}
 +
  #ifdef HAVE_WINDOW_SYSTEM
  
  /* Set F->desired_tab_bar_string to a Lisp string representing frame
-@@ -13809,6 +13828,25 @@ #define PROP(IDX) \
+@@ -14013,6 +14108,33 @@ #define PROP(IDX) \
  }
  
  
@@ -1552,12 +1627,20 @@ index 50efa50c55..9f4967582c 100644
 +build_desired_top_bar_string (struct frame *f)
 +{
 +  Lisp_Object format = f->top_bar_format;
-+  Lisp_Object top_bar_string = Fformat_mode_line (format, Qnil, Qnil, Qnil);
++  Lisp_Object top_bar_string;
++  Lisp_Object frame;
++  XSETFRAME (frame, f);
++  Vtop_bar_current_frame = frame;
++  top_bar_string = Fformat_mode_line (format, Qnil, Qnil, Qnil);
++  Vtop_bar_current_frame = Qnil;
 +
-+  printf("[%s] top bar string: (format: %s) %s\n",
++  /* NOTE(mkvoya):
++  printf("[%s] format: ", __func__); debug_print(format);
++  printf("\n");
++  printf("[%s] top bar string: %s\n",
 +	 __func__,
-+	 NILP(format) ? "NIL" : SSDATA(format),
 +	 SSDATA(top_bar_string));
++  */
 +  /* Prepare F->desired_top_bar_string.  Make a new string.  */
 +  fset_desired_top_bar_string (f, top_bar_string);
 +}
@@ -1566,7 +1649,7 @@ index 50efa50c55..9f4967582c 100644
  /* Display one line of the tab-bar of frame IT->f.
  
     HEIGHT specifies the desired height of the tab-bar line.
-@@ -14011,6 +14049,68 @@ DEFUN ("tab-bar-height", Ftab_bar_height, Stab_bar_height,
+@@ -14215,6 +14337,68 @@ DEFUN ("tab-bar-height", Ftab_bar_height, Stab_bar_height,
  }
  
  
@@ -1635,7 +1718,7 @@ index 50efa50c55..9f4967582c 100644
  /* Display the tab-bar of frame F.  Value is true if tab-bar's
     height should be changed.  */
  static bool
-@@ -14178,6 +14278,118 @@ redisplay_tab_bar (struct frame *f)
+@@ -14392,6 +14576,124 @@ redisplay_tab_bar (struct frame *f)
    return false;
  }
  
@@ -1649,6 +1732,9 @@ index 50efa50c55..9f4967582c 100644
 +  struct it it;
 +  struct glyph_row *row;
 +
++  /* NOTE(mkvoya):
++     printf("[%s]\n", __func__);
++  */
 +  f->top_bar_redisplayed = true;
 +
 +  /* If frame hasn't a top-bar window or if it is zero-height, don't
@@ -1670,10 +1756,13 @@ index 50efa50c55..9f4967582c 100644
 +    }
 +
 +  /* Set up an iterator for the top-bar window.  */
++
 +  init_iterator (&it, w, -1, -1, w->desired_matrix->rows, TOP_BAR_FACE_ID);
 +  it.first_visible_x = 0;
 +  it.last_visible_x = WINDOW_PIXEL_WIDTH (w);
 +  row = it.glyph_row;
++  /* NOTE(mkvoya): The following line forces the update of top-bar.  */
++  clear_glyph_matrix (w->current_matrix);
 +  row->reversed_p = false;
 +
 +  /* Build a string that represents the contents of the top-bar.  */
@@ -1754,7 +1843,7 @@ index 50efa50c55..9f4967582c 100644
  /* Get information about the tab-bar item which is displayed in GLYPH
     on frame F.  Return in *PROP_IDX the index where tab-bar item
     properties start in F->tab_bar_items.  Return in CLOSE_P an
-@@ -14396,6 +14608,32 @@ note_tab_bar_highlight (struct frame *f, int x, int y)
+@@ -14610,6 +14912,31 @@ note_tab_bar_highlight (struct frame *f, int x, int y)
      help_echo_string = AREF (f->tab_bar_items, prop_idx + TAB_BAR_ITEM_CAPTION);
  }
  
@@ -1769,7 +1858,6 @@ index 50efa50c55..9f4967582c 100644
 +handle_top_bar_click (struct frame *f, int x, int y, bool down_p,
 +		      int modifiers)
 +{
-+  printf ("[%s] i'm here.\n", __func__);
 +  return Fcons (Qtab_bar, Qnil);
 +}
 +
@@ -1787,7 +1875,7 @@ index 50efa50c55..9f4967582c 100644
  #endif /* HAVE_WINDOW_SYSTEM */
  
  /* Find the tab-bar item at X coordinate and return its information.  */
-@@ -19960,6 +20198,11 @@ redisplay_window (Lisp_Object window, bool just_this_one_p)
+@@ -20314,6 +20641,11 @@ redisplay_window (Lisp_Object window, bool just_this_one_p)
  	      && redisplay_tab_bar (f))
  	    ignore_mouse_drag_p = true;
  
@@ -1799,32 +1887,32 @@ index 50efa50c55..9f4967582c 100644
  #ifdef HAVE_EXT_TOOL_BAR
  	  if (FRAME_EXTERNAL_TOOL_BAR (f))
  	    update_frame_tool_bar (f);
-@@ -19975,12 +20218,16 @@ redisplay_window (Lisp_Object window, bool just_this_one_p)
+@@ -20327,12 +20659,16 @@ redisplay_window (Lisp_Object window, bool just_this_one_p)
+         }
+       else
          {
-           if ((FRAME_TAB_BAR_LINES (f) > 0))
-             display_tab_bar (w);
 +          if ((FRAME_TOP_BAR_LINES (f) > 0))
 +            display_top_bar (w);
+           if ((FRAME_TAB_BAR_LINES (f) > 0))
+             display_tab_bar (w);
          }
  
        gui_consider_frame_title (w->frame);
  #else
-       if ((FRAME_TAB_BAR_LINES (f) > 0))
-         display_tab_bar (w);
 +      if ((FRAME_TOP_BAR_LINES (f) > 0))
 +        display_top_bar (w);
+       if ((FRAME_TAB_BAR_LINES (f) > 0))
+         display_tab_bar (w);
  #endif
-     }
- 
-@@ -26946,6 +27193,7 @@ DEFUN ("format-mode-line", Fformat_mode_line, Sformat_mode_line,
+@@ -27326,6 +27662,7 @@ DEFUN ("format-mode-line", Fformat_mode_line, Sformat_mode_line,
+     : EQ (face, Qmode_line_active) ? MODE_LINE_ACTIVE_FACE_ID
+     : EQ (face, Qmode_line_inactive) ? MODE_LINE_INACTIVE_FACE_ID
      : EQ (face, Qheader_line) ? HEADER_LINE_FACE_ID
++    : EQ (face, Qtop_bar) ? TOP_BAR_FACE_ID
      : EQ (face, Qtab_line) ? TAB_LINE_FACE_ID
      : EQ (face, Qtab_bar) ? TAB_BAR_FACE_ID
-+    : EQ (face, Qtop_bar) ? TOP_BAR_FACE_ID
      : EQ (face, Qtool_bar) ? TOOL_BAR_FACE_ID
-     : DEFAULT_FACE_ID;
- 
-@@ -34333,7 +34581,7 @@ note_mouse_highlight (struct frame *f, int x, int y)
+@@ -34762,7 +35099,7 @@ note_mouse_highlight (struct frame *f, int x, int y)
      return;
  
    /* Which window is that in?  */
@@ -1833,7 +1921,7 @@ index 50efa50c55..9f4967582c 100644
  
    /* If displaying active text in another window, clear that.  */
    if (! EQ (window, hlinfo->mouse_face_window)
-@@ -34454,6 +34702,13 @@ note_mouse_highlight (struct frame *f, int x, int y)
+@@ -34883,6 +35220,13 @@ note_mouse_highlight (struct frame *f, int x, int y)
  	 item can be still highlighted again in the future.  */
        f->last_tab_bar_item = -1;
      }
@@ -1847,7 +1935,7 @@ index 50efa50c55..9f4967582c 100644
  #endif
  
  #if defined (HAVE_WINDOW_SYSTEM) && ! defined (HAVE_EXT_TOOL_BAR)
-@@ -35640,6 +35895,7 @@ syms_of_xdisp (void)
+@@ -36069,6 +36413,7 @@ syms_of_xdisp (void)
  #endif
  #ifdef HAVE_WINDOW_SYSTEM
    defsubr (&Stab_bar_height);
@@ -1855,7 +1943,7 @@ index 50efa50c55..9f4967582c 100644
    defsubr (&Stool_bar_height);
    defsubr (&Slookup_image_map);
  #endif
-@@ -36141,6 +36397,14 @@ syms_of_xdisp (void)
+@@ -36563,6 +36908,18 @@ syms_of_xdisp (void)
  Otherwise, no border is added below the tab-bar.  */);
    Vtab_bar_border = Qinternal_border_width;
  
@@ -1867,14 +1955,18 @@ index 50efa50c55..9f4967582c 100644
 +Otherwise, no border is added below the top-bar.  */);
 +  Vtop_bar_border = Qinternal_border_width;
 +
++  DEFVAR_LISP ("top-bar-current-frame", Vtop_bar_current_frame,
++    doc: /* The current frame on which top bar is being calculated. */);
++  Vtop_bar_current_frame = Qnil;
++
    DEFVAR_LISP ("tab-bar-button-margin", Vtab_bar_button_margin,
      doc: /* Margin around tab-bar buttons in pixels.
  If an integer, use that for both horizontal and vertical margins.
 diff --git a/src/xfaces.c b/src/xfaces.c
-index 8ebb33c5ab..72d6066ac3 100644
+index bbc1d352c6..f24b0ea313 100644
 --- a/src/xfaces.c
 +++ b/src/xfaces.c
-@@ -4905,6 +4905,7 @@ lookup_basic_face (struct window *w, struct frame *f, int face_id)
+@@ -4992,6 +4992,7 @@ lookup_basic_face (struct window *w, struct frame *f, int face_id)
      case HEADER_LINE_FACE_ID:		name = Qheader_line;		break;
      case TAB_LINE_FACE_ID:		name = Qtab_line;		break;
      case TAB_BAR_FACE_ID:		name = Qtab_bar;		break;
@@ -1882,7 +1974,7 @@ index 8ebb33c5ab..72d6066ac3 100644
      case TOOL_BAR_FACE_ID:		name = Qtool_bar;		break;
      case FRINGE_FACE_ID:		name = Qfringe;			break;
      case SCROLL_BAR_FACE_ID:		name = Qscroll_bar;		break;
-@@ -5631,6 +5632,7 @@ realize_basic_faces (struct frame *f)
+@@ -5737,6 +5738,7 @@ realize_basic_faces (struct frame *f)
        realize_named_face (f, Qchild_frame_border, CHILD_FRAME_BORDER_FACE_ID);
        realize_named_face (f, Qtab_bar, TAB_BAR_FACE_ID);
        realize_named_face (f, Qtab_line, TAB_LINE_FACE_ID);
@@ -1890,15 +1982,7 @@ index 8ebb33c5ab..72d6066ac3 100644
  
        /* Reflect changes in the `menu' face in menu bars.  */
        if (FRAME_FACE_CACHE (f)->menu_face_changed_p)
-@@ -5768,6 +5770,7 @@ realize_default_face (struct frame *f)
- 	 acceptable as a font for the default face (perhaps because
- 	 auto-scaled fonts are rejected), so we must adjust the frame
- 	 font.  */
-+      printf("Hello defualt face\n");
-       gui_set_font (f, LFACE_FONT (lface), Qnil);
-     }
- #endif
-@@ -7004,6 +7007,7 @@ syms_of_xfaces (void)
+@@ -7161,6 +7163,7 @@ syms_of_xfaces (void)
    DEFSYM (Qdefault, "default");
    DEFSYM (Qtool_bar, "tool-bar");
    DEFSYM (Qtab_bar, "tab-bar");
@@ -1907,10 +1991,10 @@ index 8ebb33c5ab..72d6066ac3 100644
    DEFSYM (Qtab_line, "tab-line");
    DEFSYM (Qheader_line, "header-line");
 diff --git a/src/xterm.c b/src/xterm.c
-index 98641d0241..18d9d95c6d 100644
+index 9dc83ac84c..9589081efb 100644
 --- a/src/xterm.c
 +++ b/src/xterm.c
-@@ -7814,6 +7814,19 @@ x_draw_image_relief (struct glyph_string *s)
+@@ -9513,6 +9513,19 @@ x_draw_image_relief (struct glyph_string *s)
  	extra_x = extra_y = XFIXNUM (Vtab_bar_button_margin) - thick;
      }
  
@@ -1931,5 +2015,5 @@ index 98641d0241..18d9d95c6d 100644
      {
        if (CONSP (Vtool_bar_button_margin)
 -- 
-2.36.0
+2.37.1
 
