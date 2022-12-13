@@ -88,6 +88,8 @@ class EmacsPlusAT30 < EmacsBase
   local_patch "system-appearance", sha: "d6ee159839b38b6af539d7b9bdff231263e451c1fd42eec0d125318c9db8cd92"
   local_patch "poll", sha: "052eacac5b7bd86b466f9a3d18bff9357f2b97517f463a09e4c51255bdb14648" if build.with? "poll"
   local_patch "round-undecorated-frame", sha: "0e5ac1ccabb66a374fc9e8f2fb2d6e591d4c211b4aa912be280e68a846063184"
+  local_patch "expose-window-parameters", sha: "a6e8ace75b3523030134877b59995cd5399f6e3f72e994359210291a5dcf9796"
+  local_patch "add-top-bar", sha: "41eb0309e1bc2ba412efadadd1823c208006e7ff5294c36a59aee705a3feb825"
 
   #
   # Initialize
