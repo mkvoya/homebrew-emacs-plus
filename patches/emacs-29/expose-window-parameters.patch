@@ -1,4 +1,4 @@
-From f6ca62b83d75676711c4f787db62ee52da2006da Mon Sep 17 00:00:00 2001
+From 1345a7f0c3492519dbac0b1a2befa6ac8e54ce27 Mon Sep 17 00:00:00 2001
 From: Mingkai Dong <mingkaidong@gmail.com>
 Date: Fri, 24 Dec 2021 01:19:03 +0800
 Subject: [PATCH 1/2] Expose ns_fullsize_content and ns_title_hidden
@@ -12,7 +12,7 @@ Subject: [PATCH 1/2] Expose ns_fullsize_content and ns_title_hidden
  5 files changed, 71 insertions(+)
 
 diff --git a/src/frame.c b/src/frame.c
-index a39e1c4944..64b0df8c66 100644
+index 037914ac9dc..fdadb1601d4 100644
 --- a/src/frame.c
 +++ b/src/frame.c
 @@ -988,6 +988,8 @@ make_frame (bool mini_p)
@@ -24,7 +24,7 @@ index a39e1c4944..64b0df8c66 100644
  #endif
  #endif
    f->select_mini_window_flag = false;
-@@ -3923,6 +3925,8 @@ DEFUN ("frame-scale-factor", Fframe_scale_factor, Sframe_scale_factor,
+@@ -3984,6 +3986,8 @@ DEFUN ("frame-scale-factor", Fframe_scale_factor, Sframe_scale_factor,
  #ifdef NS_IMPL_COCOA
    {"ns-appearance",		SYMBOL_INDEX (Qns_appearance)},
    {"ns-transparent-titlebar",	SYMBOL_INDEX (Qns_transparent_titlebar)},
@@ -33,7 +33,7 @@ index a39e1c4944..64b0df8c66 100644
  #endif
  };
  
-@@ -6141,6 +6145,8 @@ syms_of_frame (void)
+@@ -6278,6 +6282,8 @@ syms_of_frame (void)
  #ifdef NS_IMPL_COCOA
    DEFSYM (Qns_appearance, "ns-appearance");
    DEFSYM (Qns_transparent_titlebar, "ns-transparent-titlebar");
@@ -43,7 +43,7 @@ index a39e1c4944..64b0df8c66 100644
  
    DEFSYM (Qalpha, "alpha");
 diff --git a/src/frame.h b/src/frame.h
-index 458b6257e4..f5654e9ce5 100644
+index b95b94c7685..87e96d5cb65 100644
 --- a/src/frame.h
 +++ b/src/frame.h
 @@ -661,6 +661,10 @@ #define EMACS_FRAME_H
@@ -57,7 +57,7 @@ index 458b6257e4..f5654e9ce5 100644
  #endif
  } GCALIGNED_STRUCT;
  
-@@ -1102,6 +1106,8 @@ #define FRAME_TOOLTIP_P(f) ((f)->tooltip)
+@@ -1116,6 +1120,8 @@ #define FRAME_TOOLTIP_P(f) ((f)->tooltip)
  #ifdef NS_IMPL_COCOA
  #define FRAME_NS_APPEARANCE(f) ((f)->ns_appearance)
  #define FRAME_NS_TRANSPARENT_TITLEBAR(f) ((f)->ns_transparent_titlebar)
@@ -67,10 +67,10 @@ index 458b6257e4..f5654e9ce5 100644
  #else /* not HAVE_WINDOW_SYSTEM */
  #define FRAME_UNDECORATED(f) ((void) (f), 0)
 diff --git a/src/nsfns.m b/src/nsfns.m
-index 433df05961..6038fa3333 100644
+index 8804a7df7cf..1a307d2585b 100644
 --- a/src/nsfns.m
 +++ b/src/nsfns.m
-@@ -1060,6 +1060,8 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -1070,6 +1070,8 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
  #ifdef NS_IMPL_COCOA
    ns_set_appearance,
    ns_set_transparent_titlebar,
@@ -79,7 +79,7 @@ index 433df05961..6038fa3333 100644
  #endif
  };
  
-@@ -1392,6 +1394,18 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -1402,6 +1404,18 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
    FRAME_NS_TRANSPARENT_TITLEBAR (f) = !NILP (tem) && !EQ (tem, Qunbound);
    store_frame_param (f, Qns_transparent_titlebar,
                       FRAME_NS_TRANSPARENT_TITLEBAR (f) ? Qt : Qnil);
@@ -99,7 +99,7 @@ index 433df05961..6038fa3333 100644
  
    parent_frame = gui_display_get_arg (dpyinfo, parms, Qparent_frame, NULL, NULL,
 diff --git a/src/nsterm.h b/src/nsterm.h
-index 2a4c7571a3..989698925c 100644
+index b6e5a813a6d..b80116a81b2 100644
 --- a/src/nsterm.h
 +++ b/src/nsterm.h
 @@ -1241,6 +1241,12 @@ #define NSAPP_DATA2_RUNFILEDIALOG 11
@@ -116,10 +116,10 @@ index 2a4c7571a3..989698925c 100644
  extern int ns_select (int nfds, fd_set *readfds, fd_set *writefds,
  		      fd_set *exceptfds, struct timespec *timeout,
 diff --git a/src/nsterm.m b/src/nsterm.m
-index e3f47eb905..e8f0293fbf 100644
+index 3e089cc1ff1..af7653ba2dc 100644
 --- a/src/nsterm.m
 +++ b/src/nsterm.m
-@@ -1961,6 +1961,38 @@ Hide the window (X11 semantics)
+@@ -1960,6 +1960,38 @@ Hide the window (X11 semantics)
      }
  #endif /* MAC_OS_X_VERSION_MAX_ALLOWED >= 101000 */
  }
@@ -158,7 +158,7 @@ index e3f47eb905..e8f0293fbf 100644
  #endif /* NS_IMPL_COCOA */
  
  static void
-@@ -9028,6 +9060,11 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+@@ -9090,6 +9122,11 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
  		 | NSWindowStyleMaskMiniaturizable
  		 | NSWindowStyleMaskClosable);
  
@@ -170,7 +170,7 @@ index e3f47eb905..e8f0293fbf 100644
    last_drag_event = nil;
  
    width = FRAME_TEXT_COLS_TO_PIXEL_WIDTH (f, f->text_cols);
-@@ -9070,6 +9107,8 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+@@ -9132,6 +9169,8 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
  #if defined (NS_IMPL_COCOA) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101000
        if ([self respondsToSelector:@selector(titlebarAppearsTransparent)])
          [self setTitlebarAppearsTransparent:FRAME_NS_TRANSPARENT_TITLEBAR (f)];
@@ -180,5 +180,5 @@ index e3f47eb905..e8f0293fbf 100644
  
        [self setParentChildRelationships];
 -- 
-2.37.1
+2.40.1
 
