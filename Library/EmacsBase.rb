@@ -19,6 +19,13 @@ class EmacsBase < Formula
     end
   end
 
+  def self.local_car(name, sha:)
+    resource "#{name}.car" do
+      url (@@urlResolver.car_url name), :using => CopyDownloadStrategy
+      sha256 sha
+    end
+  end
+
   def self.inject_icon_options
     ICONS_CONFIG.each do |icon, sha|
       option "with-#{icon}-icon", "Using Emacs #{icon} icon"
@@ -109,6 +116,11 @@ class EmacsBase < Formula
     system "/usr/libexec/PlistBuddy -c 'Set NSMicrophoneUsageDescription Emacs requires permission to access the Microphone.' '#{plist}'"
     system "/usr/libexec/PlistBuddy -c 'Add NSSpeechRecognitionUsageDescription string' '#{plist}' || true"
     system "/usr/libexec/PlistBuddy -c 'Set NSSpeechRecognitionUsageDescription Emacs requires permission to handle any speech recognition.' '#{plist}' || true"
+
+    # Set CFBundleIconName to use Assets.car icon
+    system "/usr/libexec/PlistBuddy -c 'Add :CFBundleIconName string' '#{plist}' || true"
+    system "/usr/libexec/PlistBuddy -c 'Set :CFBundleIconName EmacsLG1' '#{plist}'"
+
     system "touch '#{app}'"
   end
 

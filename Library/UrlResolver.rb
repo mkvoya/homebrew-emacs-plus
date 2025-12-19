@@ -19,4 +19,8 @@ class UrlResolver
   def icon_url name
     "#{@formula_root}/icons/#{name}.icns"
   end
+
+  def car_url name
+    "#{@formula_root}/icons/#{name}.car"
+  end
 end

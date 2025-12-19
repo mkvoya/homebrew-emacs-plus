@@ -26,6 +26,9 @@ class EmacsPlusAT31 < EmacsBase
   # Dependencies
   #
 
+  depends_on "autoconf" => :build
+  depends_on "automake" => :build
+  depends_on "libtool"  => :build
   depends_on "make" => :build
   depends_on "autoconf" => :build
   depends_on "gnu-sed" => :build
@@ -74,6 +77,7 @@ class EmacsPlusAT31 < EmacsBase
   # URL
   #
 
+  # ENV['HOMEBREW_EMACS_PLUS_31_REVISION'] = "3e5af06e065"
   if ENV['HOMEBREW_EMACS_PLUS_31_REVISION']
     url "https://github.com/emacs-mirror/emacs.git", :revision => ENV['HOMEBREW_EMACS_PLUS_31_REVISION']
   else
@@ -85,6 +89,8 @@ class EmacsPlusAT31 < EmacsBase
   #
 
   inject_icon_options
+
+  local_car "Assets", sha: "2199cba638a6d7e5d4ef1d688f177b782c5c6f3f549be947ccc516f1405c8aed"
 
   #
   # Patches
@@ -108,7 +114,9 @@ class EmacsPlusAT31 < EmacsBase
       --prefix=#{prefix}
       --with-native-compilation=aot
     ]
+      # --with-native-compilation=no
 
+    #
     args << "--with-xml2"
     args << "--with-gnutls"
 
@@ -198,6 +206,14 @@ class EmacsPlusAT31 < EmacsBase
       create_emacs_client_app(icons_dir)
 
       # (prefix/"share/emacs/#{version}").install "lisp"
+      # Install Assets.car
+      resource("Assets.car").stage do
+        icons_dir.install "Assets.car"
+      end
+      # Remove Emacs.icns to ensure Assets.car icon is used
+      rm "#{icons_dir}/Emacs.icns" if File.exist?("#{icons_dir}/Emacs.icns")
+
+      (prefix/"share/emacs/#{version}").install "lisp"
       prefix.install "nextstep/Emacs.app"
       (prefix/"Emacs.app/Contents").install "native-lisp"
       prefix.install "nextstep/Emacs Client.app"
