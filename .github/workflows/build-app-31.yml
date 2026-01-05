@@ -44,9 +44,8 @@ jobs:
         run: |
           brew update
           brew install autoconf automake texinfo gnutls librsvg libxml2 \
-            imagemagick libgccjit tree-sitter@0.25 pkg-config
-          # tree-sitter@0.25 is keg-only, set up paths
-          echo "PKG_CONFIG_PATH=$(brew --prefix tree-sitter@0.25)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+            imagemagick libgccjit tree-sitter pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix tree-sitter)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
       - name: Clone Emacs source
         run: |
@@ -77,12 +76,36 @@ jobs:
               echo "Warning: $patch_file not found, skipping"
             fi
           done
-
+      - name: Create pkg-config wrapper for selective static linking
+        run: |
+            cat > /tmp/pkg-config-wrapper << 'EOF'
+            #!/bin/bash
+            # Wrapper to use static linking for all libraries except librsvg and imagemagick
+            # Check if this is librsvg or imagemagick by examining all arguments
+            USE_DYNAMIC=false
+            for arg in "$@"; do
+              if [[ "$arg" =~ (librsvg|rsvg|Magick|ImageMagick) ]]; then
+                USE_DYNAMIC=true
+                break
+              fi
+            done
+            
+            if [ "$USE_DYNAMIC" = true ]; then
+              # Use dynamic linking for librsvg and imagemagick
+              exec pkgconf "$@"
+            else
+              # Use static linking for other libraries
+              exec pkgconf -static "$@"
+            fi
+            EOF
+            chmod +x /tmp/pkg-config-wrapper
       - name: Build Emacs
         run: |
           cd emacs-src
           ./autogen.sh
-          ./configure \
+          ./configure CFLAGS='-O2 -g0 -flto=thin -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT'   \
+            PKG_CONFIG='/tmp/pkg-config-wrapper'  \
+            PKG_CONFIG_PATH="$PKG_CONFIG_PATH" \
             --with-ns \
             --with-native-compilation=aot \
             --with-xwidgets \
